@@ -1,77 +1,226 @@
 <!doctype html>
-<html lang="en">
+<html>
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Credit Control Interest Calculator</title>
 <style>
-:root{--bg:#f4f6f8;--card:#fff;--text:#111;--muted:#666;--border:#ccd2da;--blue:#075db3;--green:#198754;--red:#b02a37}*{box-sizing:border-box}body{font-family:Arial,Segoe UI,sans-serif;margin:0;padding:18px;background:var(--bg);color:var(--text)}main{max-width:1200px;margin:auto}.box{background:var(--card);border:1px solid var(--border);border-radius:8px;padding:14px;margin:12px 0}h1{margin:0 0 8px;font-size:26px}h2{font-size:18px;margin:0 0 10px}.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:10px}label{display:block;font-weight:600;font-size:13px}input,textarea,button{font:inherit}input,textarea{width:100%;padding:7px;border:1px solid var(--border);border-radius:5px;margin-top:4px}textarea{height:120px}button{background:var(--blue);color:white;border:0;border-radius:5px;padding:8px 11px;margin:4px 4px 4px 0;cursor:pointer}button.secondary{background:#59636f}button.danger{background:var(--red)}table{border-collapse:collapse;width:100%;background:white;font-size:13px}th,td{border:1px solid var(--border);padding:6px;text-align:left;vertical-align:top}th{background:#eef1f5}.scroll{overflow:auto}.total{display:inline-block;min-width:200px;background:#f8fafc;border-left:4px solid var(--blue);padding:10px;margin:5px 8px 5px 0}.total b{display:block;font-size:20px;color:var(--blue)}pre{white-space:pre-wrap;background:#111;color:#eee;padding:12px;border-radius:6px;overflow:auto}.msg{padding:9px;border-left:4px solid var(--green);background:#e9f7ef;margin-top:8px}.warn{border-left-color:#d39e00;background:#fff8df}.err{border-left-color:var(--red);background:#fdecee}@media print{.noprint,button{display:none!important}body{background:white}.box{border:0}}
+body{font-family:Arial,Segoe UI,sans-serif;margin:20px;background:#f4f6f8;color:#111}
+h1{margin-top:0} .box{background:white;border:1px solid #ccc;padding:14px;margin:12px 0;border-radius:8px}
+label{display:inline-block;margin:6px 12px 6px 0} input{padding:6px} button{padding:7px 10px;margin:4px}
+table{border-collapse:collapse;width:100%;background:white} th,td{border:1px solid #ccc;padding:6px;text-align:left} th{background:#eee}
+textarea{width:100%;height:120px} .right{text-align:right} pre{background:#111;color:#eee;padding:12px;white-space:pre-wrap}
+@media print{button,.noprint,#importBox,#rateBox{display:none} body{background:white} .box{border:0}}
 </style>
 </head>
 <body>
-<main>
 <h1>Credit Control Interest Calculator</h1>
-<div class="box"><strong>Status:</strong> <span id="status">Starting…</span><br><span id="rateStatus"></span></div>
 <div class="box">
-<h2>Calculation Details</h2>
-<div class="grid">
-<label>Client<input id="client" type="text"></label>
-<label>Matter Ref<input id="matter" type="text"></label>
-<label>Calculation Date<input id="calcDate" type="date"></label>
-<label>Terms Days<input id="terms" type="number" value="28" min="0"></label>
+  <b>Offline local version.</b> No internet, no backend, no external files. Latest embedded rate: <span id="latest"></span>.
 </div>
-<button id="addBtn">Add Bill</button><button id="exampleBtn" class="secondary">Load Example</button><button id="calcBtn">Recalculate</button>
+
+<div class="box">
+  <label>Client <input id="client" size="30"></label>
+  <label>Matter Ref <input id="matter" size="22"></label>
+  <label>Calculation Date <input id="calcDate" type="date"></label>
+  <label>Terms Days <input id="terms" type="number" value="28" style="width:70px"></label>
+  <button onclick="addRow()">Add Bill</button>
+  <button onclick="loadExample()">Load Example</button>
+  <button onclick="calculate()">Recalculate</button>
 </div>
-<div class="box noprint">
-<h2>Import Ledger Export</h2>
-<p>Paste the SOS/Crystal export text or select a .txt/.csv/.rtf file. The parser only runs after you click parse/select a file.</p>
-<input id="file" type="file" accept=".txt,.csv,.rtf,.doc">
-<textarea id="paste" placeholder="Paste ledger export here"></textarea>
-<button id="parseBtn" class="secondary">Parse Pasted Text</button>
-<div id="parseMsg"></div>
+
+<div id="importBox" class="box noprint">
+  <h3>Import Ledger Export</h3>
+  <input type="file" id="file" accept=".doc,.rtf,.txt,.csv">
+  <button onclick="parsePasted()">Parse Pasted Text</button>
+  <p>Use the file picker for SOS/Crystal ledger exports, or paste text below.</p>
+  <textarea id="paste"></textarea>
+  <div id="parseMsg"></div>
 </div>
-<div class="box"><h2>Bills</h2><div class="scroll"><table id="bills"><thead><tr><th>Use</th><th>Bill Ref</th><th>Bill Date</th><th>Narrative</th><th>Bill Amount</th><th>Outstanding</th><th>Due Date</th><th>Days</th><th>Interest</th><th>Total</th><th></th></tr></thead><tbody></tbody></table></div></div>
-<div class="box"><h2>Totals</h2><span class="total">Outstanding<b id="principal">£0.00</b></span><span class="total">Interest<b id="interest">£0.00</b></span><span class="total">Total Claim<b id="total">£0.00</b></span><br><button onclick="window.print()">Print / Save PDF</button><button id="csvBtn" class="secondary">Export CSV</button></div>
-<div class="box"><h2>Report</h2><pre id="report">Ready.</pre></div>
-<div class="box noprint"><h2>Rate Maintenance</h2><div class="grid"><label>Effective Date<input id="rateDate" type="date"></label><label>Bank Rate %<input id="rateVal" type="number" step="0.01"></label></div><button id="rateBtn">Add / Update Rate</button><button id="showRatesBtn" class="secondary">Show Rates</button><button id="resetRatesBtn" class="danger">Reset Rates</button><div id="ratesOut"></div></div>
-</main>
+
+<div class="box">
+<table id="bills">
+<thead><tr>
+<th>Use</th><th>Bill Ref</th><th>Bill Date</th><th>Narrative</th><th>Bill Amount</th><th>Outstanding</th><th>Due Date</th><th>Days</th><th>Interest</th><th>Total</th><th></th>
+</tr></thead>
+<tbody></tbody>
+</table>
+</div>
+
+<div class="box">
+  <h3>Totals</h3>
+  <p><b>Outstanding:</b> <span id="principal">£0.00</span> |
+  <b>Interest:</b> <span id="interest">£0.00</span> |
+  <b>Total:</b> <span id="total">£0.00</span></p>
+  <button onclick="window.print()">Print / Save PDF</button>
+  <button onclick="exportCsv()">Export CSV</button>
+</div>
+
+<div class="box">
+<h3>Report</h3>
+<pre id="report"></pre>
+</div>
+
+<div id="rateBox" class="box noprint">
+<h3>Rate Maintenance</h3>
+<label>Effective Date <input id="rateDate" type="date"></label>
+<label>Base Rate % <input id="rateVal" type="number" step="0.01"></label>
+<button onclick="addRate()">Add/Update Rate</button>
+<button onclick="renderRates()">Show Rates</button>
+<div id="ratesOut"></div>
+</div>
+
 <script>
-(function(){
-'use strict';
-var DEFAULT_RATES=[
-['2006-08-03',4.75],['2006-11-09',5.00],['2007-01-11',5.25],['2007-05-10',5.50],['2007-07-05',5.75],['2007-12-06',5.50],['2008-02-07',5.25],['2008-04-10',5.00],['2008-10-08',4.50],['2008-11-06',3.00],['2008-12-04',2.00],['2009-01-08',1.50],['2009-02-05',1.00],['2009-03-05',0.50],['2016-08-04',0.25],['2017-11-02',0.50],['2018-08-02',0.75],['2020-03-11',0.25],['2020-03-19',0.10],['2021-12-16',0.25],['2022-02-03',0.50],['2022-03-17',0.75],['2022-05-05',1.00],['2022-06-16',1.25],['2022-08-04',1.75],['2022-09-22',2.25],['2022-11-03',3.00],['2022-12-15',3.50],['2023-02-02',4.00],['2023-03-23',4.25],['2023-05-11',4.50],['2023-06-22',5.00],['2023-08-03',5.25],['2024-08-01',5.00],['2024-11-07',4.75],['2025-02-06',4.50],['2025-05-08',4.25],['2025-08-07',4.00],['2025-12-18',3.75]
-];
-var rates=[],bills=[];
-function $(id){return document.getElementById(id)}
-function setStatus(t,cls){var e=$('status');e.textContent=t;e.className=cls||''}
-function safeStoreGet(k){try{return localStorage.getItem(k)}catch(e){return null}}
-function safeStoreSet(k,v){try{localStorage.setItem(k,v)}catch(e){}}
-function validDate(s){return /^\d{4}-\d{2}-\d{2}$/.test(String(s||''))&&!isNaN(new Date(s+'T00:00:00').getTime())}
-function cleanRates(list){var out=[],seen={};(Array.isArray(list)?list:[]).forEach(function(r){if(r&&validDate(r[0])&&!isNaN(Number(r[1]))){seen[r[0]]=Number(r[1])}});Object.keys(seen).sort().forEach(function(d){out.push([d,seen[d]])});return out.length?out:DEFAULT_RATES.slice()}
-function loadRates(){try{var s=safeStoreGet('cc-interest-rates');rates=cleanRates(s?JSON.parse(s):DEFAULT_RATES)}catch(e){rates=DEFAULT_RATES.slice()}}
-function saveRates(){safeStoreSet('cc-interest-rates',JSON.stringify(rates))}
-function GBP(n){return new Intl.NumberFormat('en-GB',{style:'currency',currency:'GBP'}).format(Number(n||0))}
-function todayISO(){return new Date().toISOString().slice(0,10)}
-function addDays(d,n){var x=new Date(d+'T00:00:00');if(isNaN(x.getTime()))return '';x.setDate(x.getDate()+Number(n||0));return x.toISOString().slice(0,10)}
-function daysBetween(a,b){var x=new Date(a+'T00:00:00'),y=new Date(b+'T00:00:00');if(isNaN(x)||isNaN(y))return 0;return Math.max(0,Math.floor((y-x)/86400000))}
-function esc(s){return String(s||'').replace(/[&<>"']/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]})}
-function rateFor(d){var r=rates[0];for(var i=0;i<rates.length;i++){if(rates[i][0]<=d)r=rates[i];else break}return r||['1900-01-01',0]}
-function updateRateStatus(){var l=rates[rates.length-1];$('rateStatus').textContent='Latest embedded Bank Rate: '+l[1].toFixed(2)+'% from '+l[0]+'. Interest basis used: Bank Rate + 8%.'}
-function calcBill(b){var terms=Number($('terms').value||28),calc=$('calcDate').value,principal=Number(b.out||b.amount||0),due=b.date?addDays(b.date,terms):'',start=b.date?addDays(b.date,terms+1):'';if(!b.use||!validDate(b.date)||!validDate(calc)||principal<=0||calc<start)return{due:due,days:0,interest:0,total:principal,segs:[]};var cursor=start,interest=0,segs=[],guard=0;while(cursor<=calc&&guard++<5000){var rr=rateFor(cursor),next=null;for(var i=0;i<rates.length;i++){if(rates[i][0]>cursor){next=rates[i][0];break}}var end=(next&&next<=calc)?addDays(next,-1):calc;if(!validDate(end)||end<cursor)break;var d=daysBetween(cursor,addDays(end,1)),annual=Number(rr[1])+8,si=principal*(annual/100)*(d/365);interest+=si;segs.push([cursor,end,d,rr[1],annual,si]);var newCursor=addDays(end,1);if(!validDate(newCursor)||newCursor<=cursor)break;cursor=newCursor}return{due:due,days:segs.reduce(function(s,x){return s+x[2]},0),interest:interest,total:principal+interest,segs:segs}}
-function drawRows(res){var tb=document.querySelector('#bills tbody');tb.innerHTML='';bills.forEach(function(b,i){var r=res[i]||calcBill(b),tr=document.createElement('tr');tr.innerHTML='<td><input type="checkbox" '+(b.use?'checked':'')+' data-i="'+i+'" data-k="use"></td><td><input value="'+esc(b.ref)+'" data-i="'+i+'" data-k="ref"></td><td><input type="date" value="'+esc(b.date)+'" data-i="'+i+'" data-k="date"></td><td><input value="'+esc(b.narr)+'" data-i="'+i+'" data-k="narr"></td><td><input type="number" step="0.01" value="'+Number(b.amount||0)+'" data-i="'+i+'" data-k="amount"></td><td><input type="number" step="0.01" value="'+Number(b.out||0)+'" data-i="'+i+'" data-k="out"></td><td>'+r.due+'</td><td>'+r.days+'</td><td>'+GBP(r.interest)+'</td><td>'+GBP(r.total)+'</td><td><button class="danger" data-del="'+i+'">X</button></td>';tb.appendChild(tr)})}
-function calculate(){var res=[],principal=0,interest=0,lines=['Credit Control Interest Calculation','Client: '+$('client').value,'Matter: '+$('matter').value,'Calculation date: '+$('calcDate').value,'Interest basis: Bank Rate + 8%, after '+$('terms').value+' days',''];bills.forEach(function(b){var r=calcBill(b);res.push(r);if(b.use){principal+=Number(b.out||b.amount||0);interest+=r.interest;lines.push('Bill '+(b.ref||'')+' dated '+b.date+' outstanding '+GBP(b.out||b.amount));lines.push('Due '+r.due+' | Days '+r.days+' | Interest '+GBP(r.interest)+' | Total '+GBP(r.total));r.segs.forEach(function(s){lines.push('  '+s[0]+' to '+s[1]+': '+s[2]+' days at '+Number(s[3]).toFixed(2)+'% + 8% = '+Number(s[4]).toFixed(2)+'%, '+GBP(s[5]))});lines.push('')}});drawRows(res);$('principal').textContent=GBP(principal);$('interest').textContent=GBP(interest);$('total').textContent=GBP(principal+interest);lines.push('Outstanding total: '+GBP(principal),'Interest total: '+GBP(interest),'Total claim: '+GBP(principal+interest));$('report').textContent=lines.join('\n')}
-function addRow(b){bills.push(b||{use:true,ref:'',date:todayISO(),narr:'',amount:0,out:0});calculate()}
-function loadExample(){bills=[{use:true,ref:'18911',date:'2025-04-30',narr:'Bill to Mr Jason Adams CL:00211782',amount:2264.40,out:337.20},{use:true,ref:'19343',date:'2025-05-30',narr:'Bill to Mr Jason Adams CL:00211782',amount:1468.80,out:1468.80}];$('client').value='Adams Jason Mr';$('matter').value='00211782/00000001';calculate()}
-function stripRtf(t){return String(t||'').replace(/\\par[d]?/g,'\n').replace(/\\tab/g,' ').replace(/\\'[0-9a-fA-F]{2}/g,' ').replace(/\\[a-zA-Z]+-?\d* ?/g,' ').replace(/[{}]/g,' ').replace(/[ \t]{2,}/g,' ')}
-function moneyNum(s){s=String(s).replace(/[£, ]/g,'');return /^-?\d+(\.\d{2})?$/.test(s)?Number(s):null}
-function ukDate(s){var m=String(s).match(/(\d{2})\/(\d{2})\/(\d{4})/);return m?m[3]+'-'+m[2]+'-'+m[1]:''}
-function parseText(raw){var text=stripRtf(raw).slice(0,300000),lines=text.split(/\r?\n/).map(function(x){return x.trim()}).filter(Boolean),found=[];for(var i=0;i<lines.length&&i<20000;i++){var d=ukDate(lines[i]);if(!d)continue;var win=lines.slice(i,i+20),joined=win.join(' ');if(!(/\bBC\b/i.test(joined)||/Bill to/i.test(joined)||/Invoice/i.test(joined)))continue;var ref=(joined.match(/\b(\d{5,})\b/)||['',''])[1],vals=[];win.forEach(function(l){(l.match(/-?\d{1,3}(?:,\d{3})*\.\d{2}|-?\d+\.\d{2}/g)||[]).forEach(function(x){var n=moneyNum(x);if(n!==null&&n>0)vals.push(n)})});var amount=vals.length?Math.max.apply(null,vals):0,out=amount,smaller=vals.filter(function(v){return v>0&&v<amount});if(smaller.length)out=smaller[smaller.length-1];if(ref||amount)found.push({use:true,ref:ref,date:d,narr:joined.substring(0,120),amount:amount,out:out})}bills=found;$('parseMsg').innerHTML='<div class="msg">Parsed '+found.length+' bill row(s). Please check the amounts before relying on the calculation.</div>';calculate()}
-function exportCsv(){var rows=[['BillRef','BillDate','Narrative','BillAmount','Outstanding','DueDate','Days','Interest','Total']];bills.forEach(function(b){var r=calcBill(b);rows.push([b.ref,b.date,b.narr,b.amount,b.out,r.due,r.days,r.interest.toFixed(2),r.total.toFixed(2)])});var csv=rows.map(function(r){return r.map(function(v){return '"'+String(v).replace(/"/g,'""')+'"'}).join(',')}).join('\n'),a=document.createElement('a');a.href=URL.createObjectURL(new Blob([csv],{type:'text/csv'}));a.download='interest-calculation-'+todayISO()+'.csv';a.click()}
-function renderRates(){var h='<table><tr><th>Effective Date</th><th>Bank Rate</th><th>Bank + 8%</th></tr>';for(var i=rates.length-1;i>=0;i--)h+='<tr><td>'+rates[i][0]+'</td><td>'+rates[i][1].toFixed(2)+'%</td><td>'+(rates[i][1]+8).toFixed(2)+'%</td></tr>';h+='</table>';$('ratesOut').innerHTML=h}
-function addRate(){var d=$('rateDate').value,v=Number($('rateVal').value);if(!validDate(d)||isNaN(v)){alert('Enter a valid date and rate.');return}var found=false;rates.forEach(function(r){if(r[0]===d){r[1]=v;found=true}});if(!found)rates.push([d,v]);rates=cleanRates(rates);saveRates();updateRateStatus();renderRates();calculate()}
-function init(){try{loadRates();$('calcDate').value=todayISO();updateRateStatus();$('addBtn').onclick=function(){addRow()};$('exampleBtn').onclick=loadExample;$('calcBtn').onclick=calculate;$('parseBtn').onclick=function(){parseText($('paste').value)};$('csvBtn').onclick=exportCsv;$('rateBtn').onclick=addRate;$('showRatesBtn').onclick=renderRates;$('resetRatesBtn').onclick=function(){if(confirm('Reset rates to defaults?')){rates=DEFAULT_RATES.slice();saveRates();updateRateStatus();renderRates();calculate()}};$('file').onchange=function(e){var f=e.target.files&&e.target.files[0];if(!f)return;var rd=new FileReader();rd.onload=function(){$('paste').value=String(rd.result).slice(0,300000);parseText(rd.result)};rd.onerror=function(){$('parseMsg').innerHTML='<div class="msg err">Could not read that file. Try opening it and pasting the text instead.</div>'};rd.readAsText(f)};document.querySelector('#bills tbody').addEventListener('change',function(e){var i=e.target.getAttribute('data-i'),k=e.target.getAttribute('data-k');if(i===null||!k)return;bills[Number(i)][k]=k==='use'?e.target.checked:e.target.value;calculate()});document.querySelector('#bills tbody').addEventListener('click',function(e){var i=e.target.getAttribute('data-del');if(i!==null){bills.splice(Number(i),1);calculate()}});loadExample();setStatus('Ready','msg')}catch(err){setStatus('Startup error: '+err.message,'err');console.error(err)}}
-if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',init);else init();
-})();
+var rates = [["2006-08-03", 4.75], ["2006-11-09", 5.0], ["2007-01-11", 5.25], ["2007-05-10", 5.5], ["2007-07-05", 5.75], ["2007-12-06", 5.5], ["2008-02-07", 5.25], ["2008-04-10", 5.0], ["2008-10-08", 4.5], ["2008-11-06", 3.0], ["2008-12-04", 2.0], ["2009-01-08", 1.5], ["2009-02-05", 1.0], ["2009-03-05", 0.5], ["2016-08-04", 0.25], ["2017-11-02", 0.5], ["2018-08-02", 0.75], ["2020-03-11", 0.25], ["2020-03-19", 0.1], ["2021-12-16", 0.25], ["2022-02-03", 0.5], ["2022-03-17", 0.75], ["2022-05-05", 1.0], ["2022-06-16", 1.25], ["2022-08-04", 1.75], ["2022-09-22", 2.25], ["2022-11-03", 3.0], ["2022-12-15", 3.5], ["2023-02-02", 4.0], ["2023-03-23", 4.25], ["2023-05-11", 4.5], ["2023-06-22", 5.0], ["2023-08-03", 5.25], ["2024-08-01", 5.0], ["2024-11-07", 4.75], ["2025-02-06", 4.5], ["2025-05-08", 4.25], ["2025-08-07", 4.0], ["2025-12-18", 3.75]];
+var bills = [];
+
+function GBP(n){return new Intl.NumberFormat('en-GB',{style:'currency',currency:'GBP'}).format(Number(n||0));}
+function todayISO(){return new Date().toISOString().slice(0,10);}
+function addDays(d,days){var x=new Date(d+'T00:00:00');x.setDate(x.getDate()+Number(days));return x.toISOString().slice(0,10);}
+function daysBetween(a,b){return Math.max(0,Math.floor((new Date(b+'T00:00:00')-new Date(a+'T00:00:00'))/86400000));}
+function rateFor(d){var r=rates[0];for(var i=0;i<rates.length;i++){if(rates[i][0]<=d)r=rates[i];else break;}return r;}
+function esc(s){return String(s||'').replace(/[&<>"']/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];});}
+
+function init(){
+ document.getElementById('calcDate').value=todayISO();
+ document.getElementById('latest').textContent=rates[rates.length-1][1].toFixed(2)+'% from '+rates[rates.length-1][0];
+ document.getElementById('file').addEventListener('change',function(e){
+   var f=e.target.files[0]; if(!f)return;
+   var rd=new FileReader();
+   rd.onload=function(){document.getElementById('paste').value=String(rd.result).slice(0,60000); parseText(String(rd.result));};
+   rd.readAsText(f);
+ });
+ calculate();
+}
+
+function loadExample(){
+  bills=[];
+  drawRows([]);
+  calculate();
+}
+
+function addRow(b){
+ bills.push(b||{use:true,ref:'',date:todayISO(),narr:'',amount:0,out:0});
+ calculate();
+}
+
+function drawRows(results){
+ var tb=document.querySelector('#bills tbody'); tb.innerHTML='';
+ for(var i=0;i<bills.length;i++){
+  var b=bills[i], r=results?results[i]:calcBill(b);
+  var tr=document.createElement('tr');
+  tr.innerHTML='<td><input type="checkbox" '+(b.use?'checked':'')+' onchange="upd('+i+',\'use\',this.checked)"></td>'+
+   '<td><input value="'+esc(b.ref)+'" onchange="upd('+i+',\'ref\',this.value)"></td>'+
+   '<td><input type="date" value="'+esc(b.date)+'" onchange="upd('+i+',\'date\',this.value)"></td>'+
+   '<td><input value="'+esc(b.narr)+'" onchange="upd('+i+',\'narr\',this.value)"></td>'+
+   '<td><input type="number" step="0.01" value="'+b.amount+'" onchange="upd('+i+',\'amount\',this.value)"></td>'+
+   '<td><input type="number" step="0.01" value="'+b.out+'" onchange="upd('+i+',\'out\',this.value)"></td>'+
+   '<td>'+r.due+'</td><td>'+r.days+'</td><td>'+GBP(r.interest)+'</td><td>'+GBP(r.total)+'</td>'+
+   '<td><button onclick="bills.splice('+i+',1);calculate()">X</button></td>';
+  tb.appendChild(tr);
+ }
+}
+
+function upd(i,k,v){bills[i][k]=v;calculate();}
+
+function calcBill(b){
+ var terms=Number(document.getElementById('terms').value||28);
+ var calc=document.getElementById('calcDate').value;
+ var principal=Number(b.out||b.amount||0);
+ var due=b.date?addDays(b.date,terms):'';
+ var start=b.date?addDays(b.date,terms+1):'';
+ if(!b.use||!b.date||!calc||principal<=0||calc<start)return {due:due,days:0,interest:0,total:principal,segs:[]};
+ var cursor=start, interest=0, segs=[];
+ while(cursor<=calc){
+   var rr=rateFor(cursor), next=null;
+   for(var i=0;i<rates.length;i++){if(rates[i][0]>cursor){next=rates[i][0];break;}}
+   var end=(next&&next<=calc)?addDays(next,-1):calc;
+   var d=daysBetween(cursor,addDays(end,1));
+   var annual=rr[1]+8;
+   var si=principal*(annual/100)*(d/365);
+   interest+=si; segs.push([cursor,end,d,rr[1],annual,si]);
+   cursor=addDays(end,1);
+ }
+ return {due:due,days:segs.reduce(function(s,x){return s+x[2]},0),interest:interest,total:principal+interest,segs:segs};
+}
+
+function calculate(){
+ var res=[], principal=0, interest=0, lines=[];
+ lines.push('Credit Control Interest Calculation');
+ lines.push('Client: '+document.getElementById('client').value);
+ lines.push('Matter: '+document.getElementById('matter').value);
+ lines.push('Calculation date: '+document.getElementById('calcDate').value);
+ lines.push('Interest basis: Bank Rate + 8%, after '+document.getElementById('terms').value+' days');
+ lines.push('');
+ for(var i=0;i<bills.length;i++){
+  var b=bills[i], r=calcBill(b); res.push(r);
+  if(b.use){principal+=Number(b.out||b.amount||0);interest+=r.interest;}
+  if(b.use){
+    lines.push('Bill '+(b.ref||'')+' dated '+b.date+' outstanding '+GBP(b.out||b.amount));
+    lines.push('Due '+r.due+' | Days '+r.days+' | Interest '+GBP(r.interest)+' | Total '+GBP(r.total));
+    for(var j=0;j<r.segs.length;j++){var s=r.segs[j];lines.push('  '+s[0]+' to '+s[1]+': '+s[2]+' days at '+s[3].toFixed(2)+'% + 8% = '+s[4].toFixed(2)+'%, '+GBP(s[5]));}
+    lines.push('');
+  }
+ }
+ drawRows(res);
+ document.getElementById('principal').textContent=GBP(principal);
+ document.getElementById('interest').textContent=GBP(interest);
+ document.getElementById('total').textContent=GBP(principal+interest);
+ lines.push('Outstanding total: '+GBP(principal));
+ lines.push('Interest total: '+GBP(interest));
+ lines.push('Total claim: '+GBP(principal+interest));
+ document.getElementById('report').textContent=lines.join('\n');
+}
+
+function stripRtf(t){return String(t).replace(/\\par[d]?/g,'\n').replace(/\\tab/g,' ').replace(/\\'[0-9a-fA-F]{2}/g,' ').replace(/\\[a-zA-Z]+-?\d* ?/g,' ').replace(/[{}]/g,' ').replace(/[ \t]{2,}/g,' ');}
+function moneyNum(s){s=String(s).replace(/[£, ]/g,'');return /^-?\d+(\.\d{2})?$/.test(s)?Number(s):null;}
+function ukDate(s){var m=String(s).match(/(\d{2})\/(\d{2})\/(\d{4})/);return m?m[3]+'-'+m[2]+'-'+m[1]:'';}
+
+function parsePasted(){parseText(document.getElementById('paste').value);}
+function parseText(raw){
+ var text=stripRtf(raw), lines=text.split(/\r?\n/).map(function(x){return x.trim()}).filter(Boolean), found=[];
+ var all=lines.join('\n'), cm=all.match(/^([^\n]+)\nUnpaid Bill Postings Only/im), mm=all.match(/\b(\d{8}\/\d{8})\b/);
+ if(cm)document.getElementById('client').value=cm[1].trim();
+ if(mm)document.getElementById('matter').value=mm[1];
+ for(var i=0;i<lines.length;i++){
+   var d=ukDate(lines[i]); if(!d)continue;
+   var win=lines.slice(i,i+20), joined=win.join(' ');
+   if(!(/\bBC\b/i.test(joined)||/Bill to/i.test(joined)))continue;
+   var narr=(joined.match(/Bill to .*?(?=\s+\d{4,}\s|\s+Pt Paid\b|\s+X\d{2}\b|$)/i)||[''])[0].trim();
+   var ref=(joined.match(/\b(\d{5,})\b(?=\s+(?:Pt Paid|X\d{2}|\d|0\.00|-?\d))/)||joined.match(/\b(\d{5,})\b/)||['',''])[1];
+   var vals=[];
+   win.forEach(function(l){(l.match(/-?\d{1,3}(?:,\d{3})*\.\d{2}|-?\d+\.\d{2}/g)||[]).forEach(function(x){var n=moneyNum(x);if(n!==null&&n>0)vals.push(n);});});
+   var amount=vals.length?Math.max.apply(null,vals):0, out=amount;
+   var smaller=vals.filter(function(v){return v>0&&v<amount});
+   if(smaller.length)out=smaller[smaller.length-1];
+   if(ref||amount)found.push({use:true,ref:ref,date:d,narr:narr,amount:amount,out:out});
+ }
+ bills=found;
+ document.getElementById('parseMsg').textContent='Parsed '+found.length+' bill row(s). Please check amounts/outstanding before using.';
+ calculate();
+}
+
+function addRate(){
+ var d=document.getElementById('rateDate').value, v=Number(document.getElementById('rateVal').value);
+ if(!d||isNaN(v))return alert('Enter date and rate');
+ var hit=false; for(var i=0;i<rates.length;i++){if(rates[i][0]==d){rates[i][1]=v;hit=true;}}
+ if(!hit)rates.push([d,v]); rates.sort(function(a,b){return a[0].localeCompare(b[0])});
+ document.getElementById('latest').textContent=rates[rates.length-1][1].toFixed(2)+'% from '+rates[rates.length-1][0];
+ renderRates(); calculate();
+}
+
+function renderRates(){
+ var html='<table><tr><th>Effective Date</th><th>Bank Rate</th><th>+8% Rate</th></tr>';
+ for(var i=rates.length-1;i>=0;i--)html+='<tr><td>'+rates[i][0]+'</td><td>'+rates[i][1].toFixed(2)+'%</td><td>'+(rates[i][1]+8).toFixed(2)+'%</td></tr>';
+ html+='</table>'; document.getElementById('ratesOut').innerHTML=html;
+}
+
+function exportCsv(){
+ var rows=[['BillRef','BillDate','Narrative','BillAmount','Outstanding','DueDate','Days','Interest','Total']];
+ bills.forEach(function(b){var r=calcBill(b);rows.push([b.ref,b.date,b.narr,b.amount,b.out,r.due,r.days,r.interest.toFixed(2),r.total.toFixed(2)]);});
+ var csv=rows.map(function(r){return r.map(function(v){return '"'+String(v).replaceAll('"','""')+'"'}).join(',')}).join('\n');
+ var a=document.createElement('a');a.href=URL.createObjectURL(new Blob([csv],{type:'text/csv'}));a.download='interest-results.csv';a.click();
+}
+init();
 </script>
 </body>
 </html>
