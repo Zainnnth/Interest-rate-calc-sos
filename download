@@ -1,116 +1,86 @@
-var rates=(window.DEFAULT_RATES||[]).slice().sort(function(a,b){return a[0].localeCompare(b[0]);});
-var bills=[];
-var parserWorker=null;
-function $(id){return document.getElementById(id);}
-function GBP(n){return new Intl.NumberFormat('en-GB',{style:'currency',currency:'GBP'}).format(Number(n||0));}
-function todayISO(){return new Date().toISOString().slice(0,10);}
-function addDays(d,days){if(!d)return '';var x=new Date(d+'T00:00:00');if(isNaN(x))return '';x.setDate(x.getDate()+Number(days||0));return x.toISOString().slice(0,10);}
-function daysBetween(a,b){var da=new Date(a+'T00:00:00'),db=new Date(b+'T00:00:00');if(isNaN(da)||isNaN(db))return 0;return Math.max(0,Math.floor((db-da)/86400000));}
-function rateFor(d){var r=rates[0]||[d,0];for(var i=0;i<rates.length;i++){if(rates[i][0]<=d)r=rates[i];else break;}return r;}
-function esc(s){return String(s||'').replace(/[&<>"']/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];});}
-function setStatus(msg,kind,percent){$('parseMsg').textContent=msg;$('parseMsg').className='status '+(kind||'');if(percent!==undefined)$('parseBar').style.width=Math.max(0,Math.min(100,percent))+'%';}
-function init(){
-  $('calcDate').value=todayISO();
-  $('latest').textContent=rates.length?rates[rates.length-1][1].toFixed(2)+'% from '+rates[rates.length-1][0]:'';
-  $('addBillBtn').addEventListener('click',function(){addRow();});
-  $('recalcBtn').addEventListener('click',calculate);
-  $('clearBtn').addEventListener('click',clearAll);
-  $('exportBtn').addEventListener('click',exportCsv);
-  $('parseBtn').addEventListener('click',function(){parseLedgerText($('paste').value);});
-  $('file').addEventListener('change',handleFile);
-  $('addRateBtn').addEventListener('click',addRate);
-  $('showRatesBtn').addEventListener('click',renderRates);
-  calculate();
+function send(type,payload){postMessage(Object.assign({type:type},payload||{}));}
+function decodeRtfHex(s){
+  return s.replace(/\\'([0-9a-fA-F]{2})/g,function(_,h){
+    var c=parseInt(h,16);
+    if(c===0x96||c===0x97||c===0xAD) return '-';
+    if(c===0xA3) return '£';
+    if(c===0x92) return "'";
+    if(c===0x93||c===0x94) return '"';
+    return String.fromCharCode(c);
+  });
 }
-function clearAll(){bills=[];$('client').value='';$('matter').value='';$('paste').value='';setStatus('Ready.','',0);calculate();}
-function handleFile(e){
-  var f=e.target.files&&e.target.files[0]; if(!f)return;
-  if(f.size>8*1024*1024){setStatus('This file is larger than 8 MB. Export or paste a smaller unpaid bill report if possible.','bad',0);return;}
-  setStatus('Reading '+f.name+'...','',5);
-  var reader=new FileReader();
-  reader.onerror=function(){setStatus('Could not read the selected file.','bad',0);};
-  reader.onload=function(){var text=String(reader.result||'');$('paste').value=text.length>120000?text.slice(0,120000)+'\n\n[Preview truncated. Full file was parsed.]':text;parseLedgerText(text);};
-  reader.readAsText(f);
+function stripRtfFast(raw){
+  var s=String(raw||'');
+  if(s.indexOf('\\rtf')===-1 && s.indexOf('{\\rtf')===-1) return s;
+  send('progress',{percent:10,message:'Reading RTF ledger text...'});
+  s=decodeRtfHex(s);
+  s=s.replace(/\\par[d]?/g,'\n').replace(/\\line/g,'\n').replace(/\\tab/g,' ');
+  s=s.replace(/\\_[ ]?/g,'-');
+  s=s.replace(/\\[a-zA-Z]+-?\d* ?/g,' ');
+  s=s.replace(/\\\*/g,' ');
+  s=s.replace(/[{}]/g,' ');
+  s=s.replace(/\u8209\??/g,'-');
+  s=s.replace(/[\u2010-\u2015\u2212]/g,'-');
+  s=s.replace(/[ \t\f\v]+/g,' ');
+  return s;
 }
-function parseLedgerText(text){
-  if(!text||!String(text).trim()){setStatus('Nothing to parse.','bad',0);return;}
-  if(parserWorker){parserWorker.terminate();parserWorker=null;}
-  setStatus('Starting parser...','',2);
+function moneyNum(s){
+  s=String(s||'').replace(/[£, ]/g,'').replace(/[−–—]/g,'-');
+  return /^-?\d+(?:\.\d{2})?$/.test(s)?Number(s):null;
+}
+function isMoneyLine(s){return /^-?£?\s*\d{1,3}(?:,\d{3})*\.\d{2}$|^-?£?\s*\d+\.\d{2}$/.test(String(s||'').trim());}
+function ukDate(s){var m=String(s||'').match(/\b(\d{2})\/(\d{2})\/(\d{4})\b/);return m?m[3]+'-'+m[2]+'-'+m[1]:'';}
+function isRef(s){return /^\d{5,}$/.test(String(s||'').trim());}
+function isTrans(s){return /^\d{6,}\/\d{3}$/.test(String(s||'').trim());}
+function parseLedger(raw){
+  var text=stripRtfFast(raw);
+  send('progress',{percent:30,message:'Splitting ledger into report lines...'});
+  var lines=text.split(/\r?\n/).map(function(x){return x.trim().replace(/\s+/g,' ');}).filter(Boolean);
+  var all=lines.join('\n');
+  var clientMatch=all.match(/\n?([^\n]+?)\s*\((\d{6,})\)\s*\nUnpaid Bill Postings Only/i);
+  var matterMatch=all.match(/\b(\d{8}\/\d{8})\b/);
+  var client=clientMatch?clientMatch[1].trim():'';
+  var matter=matterMatch?matterMatch[1]:'';
+  var found=[];
+  var seen={};
+  send('progress',{percent:50,message:'Finding bill rows...'});
+  for(var i=0;i<lines.length;i++){
+    if(i%400===0) send('progress',{percent:50+Math.min(35,Math.round(i/Math.max(lines.length,1)*35)),message:'Scanning line '+i+' of '+lines.length+'...'});
+    var d=ukDate(lines[i]);
+    if(!d) continue;
+    var type=(lines[i+1]||'').trim().toUpperCase();
+    if(type!=='BC' && type!=='BILL' && type!=='BI') continue;
+    var narr=(lines[i+2]||'').trim();
+    if(!/bill|invoice/i.test(narr)) continue;
+    var ref='';
+    for(var r=i+3;r<Math.min(i+10,lines.length);r++){ if(isRef(lines[r])){ref=lines[r];break;} }
+    var amount=0;
+    for(var a=i-1;a>=Math.max(0,i-6);a--){ if(isMoneyLine(lines[a])){ var n=moneyNum(lines[a]); if(n!==null && n>0){amount=n;break;} } }
+    var valsAfter=[];
+    for(var j=i+3;j<Math.min(i+18,lines.length);j++){
+      if(isMoneyLine(lines[j])){var v=moneyNum(lines[j]); if(v!==null && v>=0) valsAfter.push(v);}
+    }
+    var out=amount;
+    if(valsAfter.length){
+      var nonVat=valsAfter.filter(function(v){return Math.abs(v-amount)>0.009 && v>0;});
+      var exact=valsAfter.filter(function(v){return Math.abs(v-amount)<0.009;});
+      if(exact.length) out=exact[exact.length-1];
+      else if(nonVat.length) out=nonVat[nonVat.length-1];
+    }
+    var key=[ref,d,amount,out].join('|');
+    if((ref||amount) && !seen[key]){
+      seen[key]=true;
+      found.push({use:true,ref:ref,date:d,narr:narr,amount:amount,out:out});
+    }
+  }
+  send('progress',{percent:95,message:'Finalising parsed results...'});
+  return {client:client,matter:matter,bills:found,lineCount:lines.length};
+}
+onmessage=function(e){
   try{
-    parserWorker=new Worker('js/parser-worker.js');
-    parserWorker.onmessage=function(e){
-      var data=e.data||{};
-      if(data.type==='progress') setStatus(data.message||'Parsing...', '', data.percent||0);
-      if(data.type==='error'){setStatus('Parser error: '+data.message,'bad',0);parserWorker.terminate();parserWorker=null;}
-      if(data.type==='done'){
-        if(data.client)$('client').value=data.client;
-        if(data.matter)$('matter').value=data.matter;
-        bills=Array.isArray(data.bills)?data.bills:[];
-        calculate();
-        setStatus('Parsed '+bills.length+' bill row(s) from '+(data.lineCount||0)+' report lines. Please verify amounts/outstanding values before use.','good',100);
-        parserWorker.terminate();parserWorker=null;
-      }
-    };
-    parserWorker.onerror=function(err){setStatus('Worker failed: '+(err.message||err),'bad',0);if(parserWorker)parserWorker.terminate();parserWorker=null;};
-    parserWorker.postMessage({raw:text});
-  }catch(ex){
-    setStatus('Worker unavailable, using fallback parser. The browser may pause briefly.','',10);
-    fallbackParse(text);
+    var result=parseLedger(e.data && e.data.raw || '');
+    send('done',result);
+  }catch(err){
+    send('error',{message:err && err.message ? err.message : String(err)});
   }
-}
-function fallbackParse(text){
-  var script=document.createElement('script');
-  script.onload=function(){setStatus('Fallback parser cannot be loaded from file preview. Use GitHub Pages/local server for large files.','bad',0);};
-  setTimeout(function(){setStatus('Please run this from GitHub Pages or a local web server so the Web Worker can parse large DOC/RTF files safely.','bad',0);},20);
-}
-function addRow(b){bills.push(b||{use:true,ref:'',date:todayISO(),narr:'',amount:0,out:0});calculate();}
-function upd(i,k,v){if(!bills[i])return;bills[i][k]=v;calculate();}
-window.upd=upd;
-function drawRows(results){
-  var tb=document.querySelector('#bills tbody');tb.innerHTML='';
-  for(var i=0;i<bills.length;i++){
-    var b=bills[i],r=results?results[i]:calcBill(b),tr=document.createElement('tr');
-    tr.innerHTML='<td><input type="checkbox" '+(b.use?'checked':'')+' onchange="upd('+i+',\'use\',this.checked)"></td>'+ 
-      '<td><input value="'+esc(b.ref)+'" onchange="upd('+i+',\'ref\',this.value)"></td>'+ 
-      '<td><input type="date" value="'+esc(b.date)+'" onchange="upd('+i+',\'date\',this.value)"></td>'+ 
-      '<td><input value="'+esc(b.narr)+'" onchange="upd('+i+',\'narr\',this.value)"></td>'+ 
-      '<td><input type="number" step="0.01" value="'+Number(b.amount||0).toFixed(2)+'" onchange="upd('+i+',\'amount\',this.value)"></td>'+ 
-      '<td><input type="number" step="0.01" value="'+Number(b.out||0).toFixed(2)+'" onchange="upd('+i+',\'out\',this.value)"></td>'+ 
-      '<td>'+esc(r.due)+'</td><td>'+r.days+'</td><td>'+GBP(r.interest)+'</td><td>'+GBP(r.total)+'</td>'+ 
-      '<td><button type="button" class="danger" onclick="bills.splice('+i+',1);calculate()">X</button></td>';
-    tb.appendChild(tr);
-  }
-}
-window.bills=bills;window.calculate=calculate;
-function calcBill(b){
-  var terms=Number($('terms').value||28),calc=$('calcDate').value,principal=Number(b.out||b.amount||0);
-  var due=b.date?addDays(b.date,terms):'',start=b.date?addDays(b.date,terms+1):'';
-  if(!b.use||!b.date||!calc||principal<=0||calc<start)return {due:due,days:0,interest:0,total:principal,segs:[]};
-  var cursor=start,interest=0,segs=[],guard=0;
-  while(cursor<=calc&&guard++<2000){
-    var rr=rateFor(cursor),next=null;
-    for(var i=0;i<rates.length;i++){if(rates[i][0]>cursor){next=rates[i][0];break;}}
-    var end=(next&&next<=calc)?addDays(next,-1):calc;
-    if(!end||end<cursor)break;
-    var d=daysBetween(cursor,addDays(end,1)),annual=Number(rr[1]||0)+8,si=principal*(annual/100)*(d/365);
-    interest+=si;segs.push([cursor,end,d,Number(rr[1]||0),annual,si]);
-    cursor=addDays(end,1);
-  }
-  return {due:due,days:segs.reduce(function(s,x){return s+x[2];},0),interest:interest,total:principal+interest,segs:segs};
-}
-function calculate(){
-  var res=[],principal=0,interest=0,lines=[];
-  lines.push('Credit Control Interest Calculation');
-  lines.push('Client: '+$('client').value); lines.push('Matter: '+$('matter').value); lines.push('Calculation date: '+$('calcDate').value);
-  lines.push('Interest basis: Bank Rate + 8%, after '+$('terms').value+' days'); lines.push('');
-  for(var i=0;i<bills.length;i++){
-    var b=bills[i],r=calcBill(b);res.push(r);
-    if(b.use){principal+=Number(b.out||b.amount||0);interest+=r.interest;lines.push('Bill '+(b.ref||'')+' dated '+b.date+' outstanding '+GBP(b.out||b.amount));lines.push('Due '+r.due+' | Days '+r.days+' | Interest '+GBP(r.interest)+' | Total '+GBP(r.total));for(var j=0;j<r.segs.length;j++){var s=r.segs[j];lines.push('  '+s[0]+' to '+s[1]+': '+s[2]+' days at '+s[3].toFixed(2)+'% + 8% = '+s[4].toFixed(2)+'%, '+GBP(s[5]));}lines.push('');}
-  }
-  drawRows(res);$('principal').textContent=GBP(principal);$('interest').textContent=GBP(interest);$('total').textContent=GBP(principal+interest);
-  lines.push('Outstanding total: '+GBP(principal));lines.push('Interest total: '+GBP(interest));lines.push('Total claim: '+GBP(principal+interest));$('report').textContent=lines.join('\n');
-}
-function addRate(){var d=$('rateDate').value,v=Number($('rateVal').value);if(!d||isNaN(v))return alert('Enter date and rate');var hit=false;for(var i=0;i<rates.length;i++){if(rates[i][0]===d){rates[i][1]=v;hit=true;}}if(!hit)rates.push([d,v]);rates.sort(function(a,b){return a[0].localeCompare(b[0]);});$('latest').textContent=rates[rates.length-1][1].toFixed(2)+'% from '+rates[rates.length-1][0];renderRates();calculate();}
-function renderRates(){var html='<table><tr><th>Effective Date</th><th>Bank Rate</th><th>+8% Rate</th></tr>';for(var i=rates.length-1;i>=0;i--)html+='<tr><td>'+rates[i][0]+'</td><td>'+Number(rates[i][1]).toFixed(2)+'%</td><td>'+(Number(rates[i][1])+8).toFixed(2)+'%</td></tr>';html+='</table>';$('ratesOut').innerHTML=html;}
-function exportCsv(){var rows=[['BillRef','BillDate','Narrative','BillAmount','Outstanding','DueDate','Days','Interest','Total']];bills.forEach(function(b){var r=calcBill(b);rows.push([b.ref,b.date,b.narr,Number(b.amount||0).toFixed(2),Number(b.out||0).toFixed(2),r.due,r.days,r.interest.toFixed(2),r.total.toFixed(2)]);});var csv=rows.map(function(r){return r.map(function(v){return '"'+String(v).replace(/"/g,'""')+'"';}).join(',');}).join('\n');var a=document.createElement('a');a.href=URL.createObjectURL(new Blob([csv],{type:'text/csv'}));a.download='interest-results.csv';a.click();setTimeout(function(){URL.revokeObjectURL(a.href);},1000);}
-document.addEventListener('DOMContentLoaded',init);
+};
